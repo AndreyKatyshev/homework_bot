@@ -16,7 +16,13 @@ class StatusCodeException(NotForSendException):
     pass
 
 
-class ForSendImportantException(Exception):
+class TelegramError(Exception):
+    """Обрабатывает ошибки для отправки в телеграмм."""
+
+    pass
+
+
+class ConectionError(Exception):
     """Обрабатывает ошибки для отправки в телеграмм."""
 
     pass

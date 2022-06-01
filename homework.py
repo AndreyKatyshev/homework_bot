@@ -7,10 +7,12 @@ import time
 
 from dotenv import load_dotenv
 from http import HTTPStatus
-from logging.handlers import RotatingFileHandler
-from typing import Optional
+from typing import Dict, List
 
-from exceptions import NotForSendException, StatusCodeException, TypeException
+from exceptions import (
+    StatusCodeException, TypeException,
+    TelegramError, ConectionError
+)
 
 
 load_dotenv()
@@ -37,7 +39,7 @@ def send_message(bot, message):
         logging.info(f'Отправляем сообщение: {message}')
         bot.send_message(TELEGRAM_CHAT_ID, message)
     except telegram.error.TelegramError as error:
-        raise(f'Сообщение не отправлено {error}')
+        raise TelegramError(f'Сообщение {message} не отправлено {error}')
     else:
         logging.info('Сообщение отправлено! Ура, товарищи!')
 
@@ -63,30 +65,23 @@ def get_api_answer(current_timestamp):
             )
         return response.json()
     except Exception as error:
-        raise(
+        raise ConectionError(
             f'проблема с подключением:{error}'
             f'Запрос выполняли вот с какими параметрами {dict_for_response}'
         )
 
 
-def check_response(response: Optional[dict]) -> Optional[list]:
-    # я перечитал тему аннотаций практикума,
-    # там мы импортируем из модуля тайпинг компановщики
-    # если переменная может принимать разные значения
-
-    # гуглил но я не понимаю что надо сделать
-    # я понял что версия пайтона у нас 3.7
-    # но что теперь с этим делать?
+def check_response(response: Dict) -> List:
     """проверяет ответ API на корректность."""
     logging.info('начинаем проверку ответа от сервера')
-    if not isinstance(response, dict):
+    if not isinstance(response, Dict):
         raise TypeError(
             'список домашек это не словарь')
     if 'homeworks' not in response or 'current_date' not in response:
         raise TypeException(
             'homeworks или current_date нет в запросе')
     homework = response.get('homeworks')
-    if not isinstance(homework, list):
+    if not isinstance(homework, List):
         raise KeyError(
             'под ключом `homeworks` домашки приходят не в виде списка')
     return homework
@@ -96,28 +91,24 @@ def parse_status(homework):
     """Извлекает статус домашней работы.
     и формулирует строку сообщения для отправки.
     """
-    homework_name = homework.get('homework_name')
     homework_status = homework.get('status')
     if 'homework_name' not in homework:
         raise KeyError(
             f'нет названия у работы {homework}')
-    verdict = HOMEWORK_STATUSES[homework_status]
     if homework_status not in HOMEWORK_STATUSES:
         raise ValueError(
             f'Статуса {homework_status} нет в словаре {HOMEWORK_STATUSES}')
     return(
-        f'Изменился статус проверки работы "{homework_name}"'
-        f'вердикт {verdict}'
-        # f'вердикт {HOMEWORK_STATUSES[homework_status]}'
-
-        # f'вердикт: {0}'.format(HOMEWORK_STATUSES[homework_status])
-        # эта тоже не прошла.
+        'Изменился статус проверки работы "{hw_name}" вердикт: {verdict}'.
+        format(
+            hw_name=homework.get('homework_name'),
+            verdict=HOMEWORK_STATUSES[homework_status])
     )
 
 
 def check_tokens():
     """проверяет доступность переменных окружения."""
-    return all([PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID],)
+    return all((PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID),)
 
 
 def main():
@@ -129,7 +120,7 @@ def main():
         )
         sys.exit('отсутствуют обязательные переменные окружения')
     current_report = {'name': '', 'messages': '', }
-    prev_report: dict = current_report.copy()
+    prev_report: Dict = current_report.copy()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
     while True:
@@ -149,15 +140,13 @@ def main():
                 prev_report = current_report.copy()
             else:
                 logging.info('нет новых статусов')
-        except NotForSendException:
-            logging.error('Сообщение не отправлено')
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             current_report['messages'] = message
             if current_report != prev_report:
                 send_message(bot, message)
                 prev_report = current_report.copy()
-            logging.error(f'Сбой в работе программы: {error}')
+            logging.error(message)
         finally:
             time.sleep(RETRY_TIME)
 
@@ -171,12 +160,7 @@ if __name__ == '__main__':
         level=logging.DEBUG,
         encoding="UTF-8",
         handlers=[
-            RotatingFileHandler(
-                BASE_LOG_DIR,
-                mode='a',
-                encoding="UTF-8",
-                maxBytes=5000000,
-                backupCount=5),
+            logging.FileHandler(f'{BASE_LOG_DIR}', 'a', 'utf-8'),
             logging.StreamHandler(stream=sys.stdout),
         ],
     )
